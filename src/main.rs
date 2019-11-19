@@ -34,6 +34,11 @@ mod domain;
 
 use domain::*;
 
+
+type GenericError = Box<dyn std::error::Error + Send + Sync>;
+type Result<T> = std::result::Result<T, GenericError>;
+
+
 fn new_edge(vertex_a: &str, edge_type: &str, vertex_b: &str, data: Option<VertexData>) -> Edge {
     Edge {
         vertex_a: String::from(vertex_a),
@@ -67,6 +72,65 @@ fn store_edges(client: &DynamoDbClient, edges: &Vec<Edge>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn get_vertex_with_edges(client: &DynamoDbClient, vertex_id: &str) -> Result<Vec<Edge>> {
+    // todo retries on error?? 
+    let query_key_vertex_a: HashMap<String, AttributeValue> =
+        [(String::from(":vertex_a"), AttributeValue{        
+                s:Some(String::from(vertex_id)),
+                ..Default::default()
+            })]
+        .iter().cloned().collect();
+
+    let mut edges_from_vertex_a : Vec<Edge> = match client.query(
+        QueryInput{
+            table_name: String::from("insignia-docs"),
+            key_condition_expression: Some(String::from("vertex_a = :vertex_a")),
+            expression_attribute_values: Some(query_key_vertex_a),
+            .. QueryInput::default()
+        }).sync() {
+            Ok(res) => {
+                res.items.unwrap_or_else(|| vec![]).into_iter().map(|item| serde_dynamodb::from_hashmap(item).unwrap()).collect()
+            },
+            Err(err) =>  {
+                println!("Error query{:?}", err);
+                vec![]
+            }
+    };
+
+    let query_key_vertex_b: HashMap<String, AttributeValue> =
+        [(String::from(":vertex_b"), AttributeValue{        
+                s:Some(String::from(vertex_id)),
+                ..Default::default()
+            })]
+        .iter().cloned().collect();
+
+    let mut edges_from_vertex_b : Vec<Edge> = match client.query(
+        QueryInput{
+            table_name: String::from("insignia-docs"),
+            key_condition_expression: Some(String::from("vertex_b = :vertex_b")),
+            index_name: Some(String::from("index-vertex_b_edges")),
+            expression_attribute_values: Some(query_key_vertex_b),
+            .. QueryInput::default()
+        }).sync() {
+            Ok(res) => {
+                res.items.unwrap_or_else(|| vec![]).into_iter().map(|item| serde_dynamodb::from_hashmap(item).unwrap()).collect()
+            },
+            Err(err) =>  {
+                println!("Error query{:?}", err);
+                vec![]
+            }
+    };
+
+    for item in &edges_from_vertex_a {
+        println!("Edge {}  {} {} {:?}", item.vertex_a, item.edge, item.vertex_b, item.data);
+    }
+    for item in &edges_from_vertex_b {
+        println!("GSI Edge {} {} {} {:?}", item.vertex_b, item.edge, item.vertex_a, item.data);
+    }
+    edges_from_vertex_a.append(&mut edges_from_vertex_b);
+    Ok(edges_from_vertex_a)
 }
 
 fn upload_document(user_id: &str, s3_bucket: &str, s3_key: &str, sha256:&str) -> Vec<Edge> {
@@ -403,63 +467,6 @@ fn get_users_by_personal_number(client: &DynamoDbClient, personal_number: &str) 
     edges_from_vertex_b.iter().map(|itm| get_user(&client, &itm.vertex_a)).filter(|itm|match itm { Some(v)=> true, None=> false}).map(|itm|itm.unwrap()).collect::<Vec<User>>()
 }
 
-fn get_vertex_with_edges(client: &DynamoDbClient, vertex_id: &str) -> Result<Vec<Edge>> {
-    let query_key_vertex_a: HashMap<String, AttributeValue> =
-        [(String::from(":vertex_a"), AttributeValue{        
-                s:Some(String::from(vertex_id)),
-                ..Default::default()
-            })]
-        .iter().cloned().collect();
-
-    let mut edges_from_vertex_a : Vec<Edge> = match client.query(
-        QueryInput{
-            table_name: String::from("insignia-docs"),
-            key_condition_expression: Some(String::from("vertex_a = :vertex_a")),
-            expression_attribute_values: Some(query_key_vertex_a),
-            .. QueryInput::default()
-        }).sync() {
-            Ok(res) => {
-                res.items.unwrap_or_else(|| vec![]).into_iter().map(|item| serde_dynamodb::from_hashmap(item).unwrap()).collect()
-            },
-            Err(err) =>  {
-                println!("Error query{:?}", err);
-                vec![]
-            }
-    };
-
-    let query_key_vertex_b: HashMap<String, AttributeValue> =
-        [(String::from(":vertex_b"), AttributeValue{        
-                s:Some(String::from(vertex_id)),
-                ..Default::default()
-            })]
-        .iter().cloned().collect();
-
-    let mut edges_from_vertex_b : Vec<Edge> = match client.query(
-        QueryInput{
-            table_name: String::from("insignia-docs"),
-            key_condition_expression: Some(String::from("vertex_b = :vertex_b")),
-            index_name: Some(String::from("index-vertex_b_edges")),
-            expression_attribute_values: Some(query_key_vertex_b),
-            .. QueryInput::default()
-        }).sync() {
-            Ok(res) => {
-                res.items.unwrap_or_else(|| vec![]).into_iter().map(|item| serde_dynamodb::from_hashmap(item).unwrap()).collect()
-            },
-            Err(err) =>  {
-                println!("Error query{:?}", err);
-                vec![]
-            }
-    };
-
-    for item in &edges_from_vertex_a {
-        println!("Edge {}  {} {} {:?}", item.vertex_a, item.edge, item.vertex_b, item.data);
-    }
-    for item in &edges_from_vertex_b {
-        println!("GSI Edge {} {} {} {:?}", item.vertex_b, item.edge, item.vertex_a, item.data);
-    }
-    edges_from_vertex_a.append(&mut edges_from_vertex_b);
-    Ok(edges_from_vertex_a)
-}
 
 
 
@@ -489,10 +496,6 @@ doc-nnnn    link            "permissons"
 }
 
 */
-
-
-type GenericError = Box<dyn std::error::Error + Send + Sync>;
-type Result<T> = std::result::Result<T, GenericError>;
 
 
 
