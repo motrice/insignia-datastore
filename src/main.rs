@@ -39,7 +39,7 @@ type GenericError = Box<dyn std::error::Error + Send + Sync>;
 type Result<T> = std::result::Result<T, GenericError>;
 
 
-fn new_edge(vertex_a: &str, edge_type: &str, vertex_b: &str, data: Option<VertexData>) -> Edge {
+fn new_edge(vertex_a: &str, edge_type: &EdgeType, vertex_b: &str, data: Option<VertexData>) -> Edge {
     Edge {
         vertex_a: String::from(vertex_a),
         vertex_b: String::from(vertex_b),
@@ -138,15 +138,15 @@ fn upload_document(user_id: &str, s3_bucket: &str, s3_key: &str, sha256:&str) ->
     let s3_id = format!("S3-{}", String::from(s3_key));
     let checksum_vertex = format!("sha256-{}", String::from(sha256));
     vec!{
-        new_edge(&doc_id, "self", &doc_id, Some(VertexData::String(String::from("some document data")))),
-        new_edge(&user_id, "owner", &doc_id, Some(VertexData::String(String::from("some document data")))),
+        new_edge(&doc_id, &EdgeType::DocumentSelf, &doc_id, Some(VertexData::String(String::from("some document data")))),
+        new_edge(&user_id, &EdgeType::DocumentOwner, &doc_id, Some(VertexData::String(String::from("some document data")))),
         new_edge(
             &doc_id, 
-            "s3", 
+            &EdgeType::DocumentS3, 
             &s3_id, 
             Some(VertexData::S3Document(S3Document{bucket: String::from(s3_bucket), key: String::from(s3_key)}))
         ),
-        new_edge(&doc_id, "checksum", &checksum_vertex, None)
+        new_edge(&doc_id, &EdgeType::DocumentChecksum, &checksum_vertex, None)
     }
 }
 
@@ -158,7 +158,7 @@ fn new_user(personal_number: &str, name: &str, given_name: &str, surname: &str, 
     let mut result = vec!{
         new_edge(
             &user_id, 
-            "usr_self", 
+            &EdgeType::UserSelf, 
             &user_id, 
             Some(VertexData::UserData(
                 UserData {
@@ -168,29 +168,29 @@ fn new_user(personal_number: &str, name: &str, given_name: &str, surname: &str, 
                 }
             ))
         ),
-        new_edge(&user_id, "usr_personal_number", &pno_vertex, None),        
+        new_edge(&user_id, &EdgeType::UserPersonalNumber, &pno_vertex, None),        
     };
     match email {
         Some(email) => {
             let email_vertex = format!("Email-{}", email);
-            result.push(new_edge(&user_id, "usr_email", &email_vertex, None))
+            result.push(new_edge(&user_id, &EdgeType::UserEmail, &email_vertex, None))
         },
         None => {}
     }
     match phone {
         Some(phone) => {
             let phone_vertex = format!("Phone-{}", phone);
-            result.push(new_edge(&user_id, "usr_phone", &phone_vertex, None))
+            result.push(new_edge(&user_id, &EdgeType::UserPhone, &phone_vertex, None))
         },
         None => {}
     }
-    match session_id {
-        Some(session_id) => {
-            let session_vertex = format!("Session-{}", session_id);
-            result.push(new_edge(&user_id, "session", &session_vertex, None))
-        },
-        None => {}
-    }
+    // match session_id {
+    //     Some(session_id) => {
+    //         let session_vertex = format!("Session-{}", session_id);
+    //         result.push(new_edge(&user_id, "session", &session_vertex, None))
+    //     },
+    //     None => {}
+    // }
     result
 }
 
@@ -202,7 +202,7 @@ fn session_new(client: &DynamoDbClient) -> Result<Session> {
     let edges = vec!{
         new_edge(
             &session_vertex, 
-            "session_self", 
+            &EdgeType::SessionSelf, 
             &session_vertex, 
             Some(VertexData::SessionData(SessionData{created: created.clone(), login: None, logout: None, auth_data: None}))
         )
@@ -225,7 +225,7 @@ fn session_auth(client: &DynamoDbClient, session_id: &str, user_id: &str, auth_d
                     let edges = vec!{
                         new_edge(
                             &session_id, 
-                            "session_user", 
+                            &EdgeType::SessionUser, 
                             &user_id, 
                             Some(VertexData::SessionData(SessionData{login: login.clone(), auth_data: Some(String::from(auth_data)), ..session.session_data()}))
                         )
@@ -254,7 +254,7 @@ fn session_logout(client: &DynamoDbClient, session_id: &str) -> Result<()> {
                     let edges = vec!{
                         new_edge(
                             &session.session_id, 
-                            "session_user", 
+                            &EdgeType::SessionUser, 
                             &user.user_id, 
                             Some(VertexData::SessionData(SessionData{logout: logout, ..session.session_data()}))
                         )
@@ -440,6 +440,41 @@ fn get_user(client: &DynamoDbClient, user_id: &str) -> Option<User> {
     })
 }
 
+fn get_user_documents(client: &DynamoDbClient, user_id: &str) -> Vec<DocumentReference> {
+    let query_key_vertex_a: HashMap<String, AttributeValue> =
+        [(String::from(":vertex_a"), AttributeValue{        
+                s:Some(String::from(user_id)),
+                ..Default::default()
+            }),
+        (String::from(":userdocs"), AttributeValue{        
+                s:Some(String::from("doc_acl_")), 
+                ..Default::default()
+            })]
+        .iter().cloned().collect();
+
+    let edges_from_vertex_a : Vec<Edge> = match client.query(
+        QueryInput{
+            table_name: String::from("insignia-docs"),
+            key_condition_expression: Some(String::from("vertex_a = :vertex_a and begins_with(edge, :userdocs)")),
+            expression_attribute_values: Some(query_key_vertex_a),
+            .. QueryInput::default()
+        }).sync() {
+            Ok(res) => {
+                res.items.unwrap_or_else(|| vec![]).into_iter().map(|item| serde_dynamodb::from_hashmap(item).unwrap()).collect()
+            },
+            Err(err) =>  {
+                println!("Error query{:?}", err);
+                vec![]
+            }
+    };
+
+    if edges_from_vertex_a.len() == 0 {
+        return vec![];
+    }
+
+    edges_from_vertex_a.iter().map(|item|DocumentReference{doc_id: item.vertex_b.clone()}).collect::<Vec<DocumentReference>>()
+}
+
 fn get_users_by_personal_number(client: &DynamoDbClient, personal_number: &str) -> Vec<User> {
     let query_key_vertex_b: HashMap<String, AttributeValue> =
         [(String::from(":vertex_b"), AttributeValue{        
@@ -525,8 +560,9 @@ user-nnnn   personalNumber  personalNumber
 org-nnnn    org-nnnn        "org data"
 org-nnnn    user-nnnn       "org user role"
 
-doc-nnnn    doc-nnnn        "title: String, checksum: String, created, modified"
+doc-nnnn    doc-nnnn        "title: String, , created, modified"
 doc-nnnn    s3-ref
+doc-nnnn    checksum          
 doc-nnnn    user-nnnn       "user role"
 doc-nnnn    org-nnnn        "org role"
 doc-nnnn    signreq-nnnn    "sign req"
@@ -619,7 +655,6 @@ doc-nnnn    link            "permissons"
             expression_attribute_values: None,
             expected: None,
             item: serde_dynamodb::to_hashmap(&itm).unwrap(),
-    //        item: "{\"vertex_a\": {\"S\": \"Doc-1234567\"}, \"node_b\": {\"S\": \"owner\"}, \"created\": {\"N\": \"1234\"}}".into() ,
             return_values: None,
             return_consumed_capacity: None,
             return_item_collection_metrics: None,
@@ -702,6 +737,15 @@ doc-nnnn    link            "permissons"
         }, 
         Err(err) => println!("Error while creating new session {}", err)
     }
+
+    let upl_doc = upload_document(&users[0].user_id, "somebucketname", "somekeyval", "somesha");
     
+    store_edges(&client, &upl_doc);
+
+    let user_documents =  get_user_documents(&client, &users[0].user_id);
+    for item in &user_documents {
+        println!("User document: {}", &item);
+    }
+
     Ok(())
 }

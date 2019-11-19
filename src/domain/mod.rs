@@ -1,5 +1,45 @@
-enum EdgeType {
+pub enum EdgeType {
+    SessionSelf,
+    SessionUser,
 
+    UserSelf, 
+    UserPersonalNumber,
+    UserEmail,
+    UserPhone,
+    //UserSession,
+    
+    DocumentSelf,
+    DocumentOwner,
+    DocumentReader,
+    DocumentS3,
+    DocumentChecksum,
+    DocumentSignRequest,
+    DocumentSignature
+}
+
+impl std::fmt::Display for EdgeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self {
+            EdgeType::SessionSelf => write!(f, "session_self"),
+            EdgeType::SessionUser => write!(f, "session_user"),
+
+            EdgeType::UserSelf => write!(f, "usr_self"),
+            EdgeType::UserPersonalNumber => write!(f, "usr_personal_number"),
+            EdgeType::UserEmail => write!(f, "usr_email"),
+            EdgeType::UserPhone => write!(f, "usr_phone"),
+            //EdgeType::UserSession => write!(f, "session"),
+
+            EdgeType::DocumentSelf => write!(f, "doc_self"),
+            EdgeType::DocumentOwner => write!(f, "doc_acl_owner"),
+            EdgeType::DocumentReader => write!(f, "doc_acl_reader"),
+            EdgeType::DocumentS3 => write!(f, "doc_location_s3"),
+            EdgeType::DocumentChecksum => write!(f, "doc_checksum"),
+            EdgeType::DocumentSignRequest => write!(f, "doc_signreq"),
+            EdgeType::DocumentSignature => write!(f, "doc_signature"),
+            _ =>  write!(f, "unknown_edge"),
+        }
+        
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -154,8 +194,19 @@ impl std::fmt::Display for User {
 
 pub struct Document {
     pub doc_id: String,
-    pub s3: S3Document,
     pub owners: Vec<LegalEntity>,
     pub signatures: Vec<LegalEntity>,
     pub signature_reqs: Vec<LegalEntity>    
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DocumentReference {
+    pub doc_id: String
+}
+
+impl std::fmt::Display for DocumentReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "DocumentReference{{doc_id: \"{}\"", self.doc_id)?;
+        write!(f, "}}")
+    }
 }
