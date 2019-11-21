@@ -39,10 +39,10 @@ type GenericError = Box<dyn std::error::Error + Send + Sync>;
 type Result<T> = std::result::Result<T, GenericError>;
 
 
-fn new_edge(vertex_a: &str, edge_type: &EdgeType, vertex_b: &str, data: Option<VertexData>) -> Edge {
+fn new_edge(vertex_a: &Vertex, edge_type: &EdgeType, vertex_b: &Vertex, data: Option<VertexData>) -> Edge {
     Edge {
-        vertex_a: String::from(vertex_a),
-        vertex_b: String::from(vertex_b),
+        vertex_a: vertex_a.to_string(),
+        vertex_b: vertex_b.to_string(),
         edge: String::from(format!("{}|{}|{}", edge_type, vertex_a, &vertex_b)),
         data: data
     }
@@ -133,13 +133,22 @@ fn get_vertex_with_edges(client: &DynamoDbClient, vertex_id: &str) -> Result<Vec
     Ok(edges_from_vertex_a)
 }
 
-fn upload_document(user_id: &str, s3_bucket: &str, s3_key: &str, sha256:&str) -> Vec<Edge> {
-    let doc_id = format!("Document-{}", &Uuid::new_v4().to_hyphenated().to_string());
-    let s3_id = format!("S3-{}", String::from(s3_key));
-    let checksum_vertex = format!("sha256-{}", String::from(sha256));
-    vec!{
-        new_edge(&doc_id, &EdgeType::DocumentSelf, &doc_id, Some(VertexData::String(String::from("some document data")))),
+fn upload_document_url(client: &DynamoDbClient, user_id: &Vertex) -> Result<String> {
+    let doc_id = Vertex::Document(Uuid::new_v4().to_hyphenated().to_string());
+    let edges = vec![
         new_edge(&user_id, &EdgeType::DocumentOwner, &doc_id, Some(VertexData::String(String::from("some document data")))),
+    ];
+    store_edges(&client, &edges);
+    Ok(format!("{}", &doc_id)) // TODO signed url
+}
+
+
+fn upload_document_completed(client: &DynamoDbClient, doc_id: &str, s3_bucket: &str, s3_key: &str, sha256:&str) -> Result<()> {
+    let doc_id : Vertex = doc_id.parse()?;
+    let s3_id = Vertex::DocumentS3(String::from(s3_key));
+    let checksum_vertex = Vertex::ChecksumSha256(String::from(sha256));
+    let edges = vec!{
+        new_edge(&doc_id, &EdgeType::DocumentSelf, &doc_id, Some(VertexData::String(String::from("some document data")))),
         new_edge(
             &doc_id, 
             &EdgeType::DocumentS3, 
@@ -147,14 +156,14 @@ fn upload_document(user_id: &str, s3_bucket: &str, s3_key: &str, sha256:&str) ->
             Some(VertexData::S3Document(S3Document{bucket: String::from(s3_bucket), key: String::from(s3_key)}))
         ),
         new_edge(&doc_id, &EdgeType::DocumentChecksum, &checksum_vertex, None)
-    }
+    };
+    store_edges(&client, &edges);
+    Ok(())
 }
 
 fn new_user(personal_number: &str, name: &str, given_name: &str, surname: &str, email:Option<&str>, phone:Option<&str>, session_id: Option<&str>) -> Vec<Edge> {
-    let user_id = format!("User-{}", &Uuid::new_v4().to_hyphenated().to_string());
-    let pno_vertex = format!("PersonalNumber-{}", personal_number);
-    //let pno_vertex = format!("Email-{}", email);
-    
+    let user_id = Vertex::User(Uuid::new_v4().to_hyphenated().to_string());
+    let pno_vertex = Vertex::PersonalNumber(String::from(personal_number));    
     let mut result = vec!{
         new_edge(
             &user_id, 
@@ -172,14 +181,14 @@ fn new_user(personal_number: &str, name: &str, given_name: &str, surname: &str, 
     };
     match email {
         Some(email) => {
-            let email_vertex = format!("Email-{}", email);
+            let email_vertex = Vertex::Email(String::from(email));
             result.push(new_edge(&user_id, &EdgeType::UserEmail, &email_vertex, None))
         },
         None => {}
     }
     match phone {
         Some(phone) => {
-            let phone_vertex = format!("Phone-{}", phone);
+            let phone_vertex = Vertex::Phone(String::from(phone));
             result.push(new_edge(&user_id, &EdgeType::UserPhone, &phone_vertex, None))
         },
         None => {}
@@ -195,7 +204,7 @@ fn new_user(personal_number: &str, name: &str, given_name: &str, surname: &str, 
 }
 
 fn session_new(client: &DynamoDbClient) -> Result<Session> {
-    let session_vertex = format!("Session-{}", &Uuid::new_v4().to_hyphenated().to_string());
+    let session_vertex = Vertex::Session(Uuid::new_v4().to_hyphenated().to_string());
     let now: DateTime<Utc> = Utc::now();
     let created = Some(now.to_rfc3339());
 
@@ -208,7 +217,7 @@ fn session_new(client: &DynamoDbClient) -> Result<Session> {
         )
     };
     match store_edges(&client, &edges) {
-        Ok(_) => Ok(Session{session_id: session_vertex, created: created, login: None, logout: None, user: None, auth_data: None}),
+        Ok(_) => Ok(Session{session_id: session_vertex.to_string(), created: created, login: None, logout: None, user: None, auth_data: None}),
         Err(err) => Err(err)
     }
 }
@@ -216,17 +225,19 @@ fn session_new(client: &DynamoDbClient) -> Result<Session> {
 fn session_auth(client: &DynamoDbClient, session_id: &str, user_id: &str, auth_data: &str) -> Result<Session> {
     let now: DateTime<Utc> = Utc::now();
     let login = Some(now.to_rfc3339());
+    let session_vertex = session_id.parse()?;
 
     match get_user(&client, user_id) {
         Some(user) => {
+            let user_vertex = user_id.parse()?;
             match session_get(&client, session_id) {
                 Some(session) => {
                     
                     let edges = vec!{
                         new_edge(
-                            &session_id, 
+                            &session_vertex, 
                             &EdgeType::SessionUser, 
-                            &user_id, 
+                            &user_vertex, 
                             Some(VertexData::SessionData(SessionData{login: login.clone(), auth_data: Some(String::from(auth_data)), ..session.session_data()}))
                         )
                     };
@@ -246,16 +257,18 @@ fn session_auth(client: &DynamoDbClient, session_id: &str, user_id: &str, auth_d
 fn session_logout(client: &DynamoDbClient, session_id: &str) -> Result<()> {
     let now: DateTime<Utc> = Utc::now();
     let logout = Some(now.to_rfc3339());
+    let session_vertex = session_id.parse()?;
 
     match session_get(&client, session_id) {
         Some(session) => {
             match &session.user {
                 Some(user) => {
+                    let user_vertex = user.user_id.parse()?;
                     let edges = vec!{
                         new_edge(
-                            &session.session_id, 
+                            &session_vertex, 
                             &EdgeType::SessionUser, 
-                            &user.user_id, 
+                            &user_vertex, 
                             Some(VertexData::SessionData(SessionData{logout: logout, ..session.session_data()}))
                         )
                     };
@@ -645,8 +658,17 @@ doc-nnnn    link            "permissons"
     let mut user1 = new_user("191212121212", "Tolvan Tolvansson", "Tolvan", "Tolvansson", Some("tolvan.tolvansson@motrice.se"), Some("+46733414983"), None);
     let user1_vertex = user1.iter().filter(|itm| {itm.edge.starts_with("usr_self|")}).collect::<Vec<&Edge>>().pop().unwrap().vertex_a.clone();
     itms.append(&mut user1);
-    itms.append(&mut upload_document(&user1_vertex, &"bucket", &"key", &"checksum"));
     
+    match upload_document_url(&client, &user1_vertex.parse()?) {
+        Ok(todo_doc_id) => {
+            match upload_document_completed(&client, &todo_doc_id, "foobucket", "barkey", "1234checksum") {
+                Ok(_) => println!("upload doc completed"),
+                Err(err) => println!("upload doc err {}", err)
+            }
+        },
+        Err(err) => println!("Error {}", err)
+    }
+
     for itm in itms {
         match client.put_item(PutItemInput{
             condition_expression: None,
@@ -738,9 +760,15 @@ doc-nnnn    link            "permissons"
         Err(err) => println!("Error while creating new session {}", err)
     }
 
-    let upl_doc = upload_document(&users[0].user_id, "somebucketname", "somekeyval", "somesha");
-    
-    store_edges(&client, &upl_doc);
+    match upload_document_url(&client, &users[0].user_id.parse()?) {
+        Ok(todo_doc_id) => {
+            match upload_document_completed(&client, &todo_doc_id, "somebucketname", "somekeyval", "somesha") {
+                Ok(_) => println!("upload doc completed"),
+                Err(err) => println!("upload doc err {}", err)
+            }
+        },
+        Err(err) => println!("Error {}", err)
+    }
 
     let user_documents =  get_user_documents(&client, &users[0].user_id);
     for item in &user_documents {

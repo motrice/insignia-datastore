@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 pub enum EdgeType {
     SessionSelf,
     SessionUser,
@@ -36,11 +38,91 @@ impl std::fmt::Display for EdgeType {
             EdgeType::DocumentChecksum => write!(f, "doc_checksum"),
             EdgeType::DocumentSignRequest => write!(f, "doc_signreq"),
             EdgeType::DocumentSignature => write!(f, "doc_signature"),
-            _ =>  write!(f, "unknown_edge"),
         }
         
     }
 }
+
+impl FromStr for EdgeType {
+    type Err = std::io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let splitted: Vec<&str> = s.trim()
+                                 .split('|')
+                                 .collect();
+
+        match splitted[0] {
+           "session_self" => Ok(EdgeType::SessionSelf),
+           "session_user" => Ok(EdgeType::SessionUser),
+           "usr_self" => Ok(EdgeType::UserSelf),
+           "usr_personal_number" => Ok(EdgeType::UserPersonalNumber),
+           "usr_email" => Ok(EdgeType::UserEmail),
+           "usr_phone" => Ok(EdgeType::UserPhone),
+           "doc_self" => Ok(EdgeType::DocumentSelf),
+           "doc_acl_owner" => Ok(EdgeType::DocumentOwner),
+           "doc_acl_reader" => Ok(EdgeType::DocumentReader),
+           "doc_location_s3" => Ok(EdgeType::DocumentS3),
+           "doc_checksum" => Ok(EdgeType::DocumentChecksum),
+           "doc_signreq" => Ok(EdgeType::DocumentSignRequest),
+           "doc_signature" => Ok(EdgeType::DocumentSignature),
+           _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid edge type"))
+        }
+    }
+}
+
+
+
+pub enum Vertex {
+    User(String),
+    Session(String),
+    Document(String),
+    DocumentS3(String),
+    ChecksumSha256(String),
+    PersonalNumber(String),
+    Email(String),
+    Phone(String)
+}
+
+impl std::fmt::Display for Vertex {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self {
+            Vertex::User(id) => write!(f, "User-{}", id),
+            Vertex::Session(id) => write!(f, "Session-{}", id),
+            Vertex::Document(id) => write!(f, "Document-{}", id),
+            Vertex::DocumentS3(id) => write!(f, "S3-{}", id),
+            Vertex::ChecksumSha256(sha) => write!(f, "SHA256-{}", sha),
+            Vertex::PersonalNumber(personal_no) => write!(f, "PersonalNumber-{}", personal_no),
+            Vertex::Email(email) => write!(f, "Email-{}", email),
+            Vertex::Phone(phone) => write!(f, "Phone-{}", phone)
+        }
+        
+    }
+}
+
+impl FromStr for Vertex {
+    type Err = std::io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let splitted: Vec<&str> = s.trim()
+                                 .split('-')
+                                 .collect();
+        if splitted.len()<2 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid vertex format"));
+        }
+        match splitted[0] {
+           "User" => Ok(Vertex::User(splitted[1..].join("-"))),
+           "Session" => Ok(Vertex::Session(splitted[1..].join("-"))),
+           "Document" => Ok(Vertex::Document(splitted[1..].join("-"))),
+           "S3" => Ok(Vertex::DocumentS3(splitted[1..].join("-"))),
+           "SHA256" => Ok(Vertex::ChecksumSha256(splitted[1..].join("-"))),
+           "PersonalNumber" => Ok(Vertex::PersonalNumber(splitted[1..].join("-"))),
+           "Email" => Ok(Vertex::Email(splitted[1..].join("-"))),
+           "Phone" => Ok(Vertex::Phone(splitted[1..].join("-"))),
+           _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid vertex type"))
+        }
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Edge {
