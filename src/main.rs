@@ -133,6 +133,42 @@ fn get_vertex_with_edges(client: &DynamoDbClient, vertex_id: &str) -> Result<Vec
     Ok(edges_from_vertex_a)
 }
 
+fn vertex_dot(client: &DynamoDbClient, vertex_id: &str) -> Result<String> {
+    let mut render_verticies : HashMap<String, VertexData> = HashMap::new();
+    let mut render_edges : Vec<String> = Vec::new();
+
+    let edges = get_vertex_with_edges(&client, &vertex_id)?;
+    for edge in edges {
+        let key = edge.vertex_b.replace("-", "_").replace(".", "").replace("+", "").replace("@", "");
+        let key_a = edge.vertex_a.replace("-", "_").replace(".", "").replace("+", "").replace("@", "");
+        match edge.data {
+            Some(data) => { 
+                render_verticies.insert(key.clone(), data.clone());
+            },
+            None => {
+                render_verticies.insert(key.clone(), VertexData::String(String::from("")));
+            }
+            
+        }; 
+        if !render_verticies.contains_key(&key_a) {
+            render_verticies.insert(key_a.clone(), VertexData::String(String::from("")));
+        }
+        render_edges.push(format!(r#"{} -> {}"#, &edge.vertex_a.to_string().replace("-", "_").replace(".", "").replace("+", "").replace("@", ""), &key)); 
+    }
+    Ok(format!(r#"digraph {{ 
+        node [shape=plaintext fontname="Sans serif" fontsize="8"];
+        {}
+        {}
+        }}"#, 
+        render_verticies.iter().map(|(key, value)|format!(r#" {} [ label=<
+    <table border="1" cellborder="0" cellspacing="1" >
+      <tr><td align="left"><b>{}</b></td></tr>
+      <tr><td align="left">{}</td></tr>
+    </table>>];
+"#, &key, &key, &value)).collect::<Vec<String>>().join("\n"),
+        render_edges.join("\n")))
+}
+
 fn upload_document_url(client: &DynamoDbClient, user_id: &Vertex) -> Result<String> {
     let doc_id = Vertex::Document(Uuid::new_v4().to_hyphenated().to_string());
     let edges = vec![
@@ -157,8 +193,7 @@ fn upload_document_completed(client: &DynamoDbClient, doc_id: &str, s3_bucket: &
         ),
         new_edge(&doc_id, &EdgeType::DocumentChecksum, &checksum_vertex, None)
     };
-    store_edges(&client, &edges);
-    Ok(())
+    store_edges(&client, &edges)
 }
 
 fn new_user(personal_number: &str, name: &str, given_name: &str, surname: &str, email:Option<&str>, phone:Option<&str>, session_id: Option<&str>) -> Vec<Edge> {
@@ -488,6 +523,8 @@ fn get_user_documents(client: &DynamoDbClient, user_id: &str) -> Vec<DocumentRef
     edges_from_vertex_a.iter().map(|item|DocumentReference{doc_id: item.vertex_b.clone()}).collect::<Vec<DocumentReference>>()
 }
 
+
+
 fn get_users_by_personal_number(client: &DynamoDbClient, personal_number: &str) -> Vec<User> {
     let query_key_vertex_b: HashMap<String, AttributeValue> =
         [(String::from(":vertex_b"), AttributeValue{        
@@ -550,6 +587,18 @@ doc-nnnn    link            "permissons"
 #[tokio::main]
 pub async fn main() -> Result<()> {
 
+
+    Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+        fn one_result() -> Result<()> {
     println!("Hello, world!");
 
     let region = Region::Custom {
@@ -775,5 +824,10 @@ doc-nnnn    link            "permissons"
         println!("User document: {}", &item);
     }
 
+    match vertex_dot(&client, &users[0].user_id.to_string()) {
+        Ok(dot) => println!("dot: {}", dot),
+        Err(err) => println!("upload doc err {}", err)
+    };
     Ok(())
+    }
 }

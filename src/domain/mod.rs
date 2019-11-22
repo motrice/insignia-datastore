@@ -152,11 +152,34 @@ pub enum VertexData {
     SessionData(SessionData)
 }
 
+impl std::fmt::Display for VertexData {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self {
+            VertexData::S3Document(data) => write!(f, "User-{}", data),
+            VertexData::String(data) => write!(f, "Session-{}", data),
+            VertexData::UserData(data) => write!(f, "Document-{}", data),
+            VertexData::SessionData(data) => write!(f, "S3-{}", data),
+        }
+        
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct S3Document {
     pub bucket: String,
     pub key: String
 }
+
+impl std::fmt::Display for S3Document {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "S3Document{{")?;
+        write!(f, ", bucket: Some(\"{}\")", self.bucket)?;
+        write!(f, ", key: Some(\"{}\")", self.key)?;
+        write!(f, "}}")
+    }
+}
+  
+
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UserData {
@@ -165,12 +188,55 @@ pub struct UserData {
     pub surname: Option<String>,
 }
 
+impl std::fmt::Display for UserData {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "UserData{{")?;
+        match &self.name {
+            Some(s) => write!(f, ", name: Some(\"{}\")", s)?,
+            None => write!(f, ", name: None")?
+        };
+        match &self.given_name {
+            Some(s) => write!(f, ", given_name: Some(\"{}\")", s)?,
+            None => write!(f, ", given_name: None")?
+        };
+        match &self.surname {
+            Some(s) => write!(f, ", surname: Some(\"{}\")", s)?,
+            None => write!(f, ", surname: None")?
+        };
+        write!(f, "}}")
+    }
+}
+
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SessionData {
     pub created: Option<String>,
     pub login: Option<String>,
     pub logout: Option<String>,
     pub auth_data: Option<String>
+}
+
+impl std::fmt::Display for SessionData {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "SessionData{{")?;
+        match &self.created {
+            Some(s) => write!(f, ", created: Some(\"{}\")", s)?,
+            None => write!(f, ", created: None")?
+        };
+        match &self.login {
+            Some(s) => write!(f, ", login: Some(\"{}\")", s)?,
+            None => write!(f, ", login: None")?
+        };
+        match &self.logout {
+            Some(s) => write!(f, ", logout: Some(\"{}\")", s)?,
+            None => write!(f, ", logout: None")?
+        };
+        match &self.auth_data {
+            Some(s) => write!(f, ", auth_data: Some(\"{}\")", s)?,
+            None => write!(f, ", auth_data: None")?
+        };
+        write!(f, "}}")
+    }
 }
 
 pub struct Organisation {
