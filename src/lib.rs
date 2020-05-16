@@ -120,7 +120,16 @@ pub struct GraphDb {
 }
 
 impl GraphDb {
-    pub fn new(region_name: &str, endpoint: &str) -> GraphDb {
+
+
+    pub fn new(region: Region) -> GraphDb {
+        info!("Create dynamodb client");
+        GraphDb {
+            client: DynamoDbClient::new(region)
+        }
+    }
+
+    pub fn new_with_region(region_name: &str, endpoint: &str) -> GraphDb {
         let region = Region::Custom {
                 name: region_name.to_owned(),
                 endpoint: endpoint.to_owned(),

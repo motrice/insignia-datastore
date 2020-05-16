@@ -52,7 +52,7 @@ pub async fn main() -> Result<()> {
         endpoint: "http://localhost:8000".to_owned(),
     };
 
-    let client = insignia_datastore::GraphDb::new("eu-north-1", "http://localhost:8000");
+    let client = insignia_datastore::GraphDb::new_with_region("eu-north-1", "http://localhost:8000");
 
     match client.client.delete_table(DeleteTableInput{table_name: String::from("bm-test-table")}).await {
         Ok(_) => println!("Deleted table"),
