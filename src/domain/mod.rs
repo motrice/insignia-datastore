@@ -3,7 +3,9 @@ use std::str::FromStr;
 pub enum EdgeType {
     SessionSelf,
     SessionUser,
-
+    SessionLogin,
+    SessionLogout,
+    
     UserSelf, 
     UserPersonalNumber,
     UserEmail,
@@ -24,6 +26,8 @@ impl std::fmt::Display for EdgeType {
         match &self {
             EdgeType::SessionSelf => write!(f, "session_self"),
             EdgeType::SessionUser => write!(f, "session_user"),
+            EdgeType::SessionLogin => write!(f, "session_login"),
+            EdgeType::SessionLogout => write!(f, "session_logout"),
 
             EdgeType::UserSelf => write!(f, "usr_self"),
             EdgeType::UserPersonalNumber => write!(f, "usr_personal_number"),
@@ -54,6 +58,8 @@ impl FromStr for EdgeType {
         match splitted[0] {
            "session_self" => Ok(EdgeType::SessionSelf),
            "session_user" => Ok(EdgeType::SessionUser),
+           "session_login" => Ok(EdgeType::SessionLogin),
+           "session_logout" => Ok(EdgeType::SessionLogout),
            "usr_self" => Ok(EdgeType::UserSelf),
            "usr_personal_number" => Ok(EdgeType::UserPersonalNumber),
            "usr_email" => Ok(EdgeType::UserEmail),
@@ -75,6 +81,8 @@ impl FromStr for EdgeType {
 pub enum Vertex {
     User(String),
     Session(String),
+    SessionLogin(String),
+    SessionLogout(String),
     Document(String),
     DocumentS3(String),
     ChecksumSha256(String),
@@ -87,6 +95,8 @@ impl std::fmt::Display for Vertex {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &self {
             Vertex::User(id) => write!(f, "User-{}", id),
+            Vertex::SessionLogin(id) => write!(f, "SessionLogin-{}", id),
+            Vertex::SessionLogout(id) => write!(f, "SessionLogout-{}", id),
             Vertex::Session(id) => write!(f, "Session-{}", id),
             Vertex::Document(id) => write!(f, "Document-{}", id),
             Vertex::DocumentS3(id) => write!(f, "S3-{}", id),
@@ -118,6 +128,7 @@ impl FromStr for Vertex {
            "PersonalNumber" => Ok(Vertex::PersonalNumber(splitted[1..].join("-"))),
            "Email" => Ok(Vertex::Email(splitted[1..].join("-"))),
            "Phone" => Ok(Vertex::Phone(splitted[1..].join("-"))),
+           "SessionLogin" => Ok(Vertex::SessionLogin(splitted[1..].join("-"))),
            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid vertex type"))
         }
     }
@@ -149,16 +160,18 @@ pub enum VertexData {
     S3Document(S3Document),
     String(String),
     UserData(UserData),
-    SessionData(SessionData)
+    SessionData(SessionData),
+    None
 }
 
 impl std::fmt::Display for VertexData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match &self {
+        match &self { // TODO strange strings in write
             VertexData::S3Document(data) => write!(f, "User-{}", data),
             VertexData::String(data) => write!(f, "Session-{}", data),
             VertexData::UserData(data) => write!(f, "Document-{}", data),
             VertexData::SessionData(data) => write!(f, "S3-{}", data),
+            VertexData::None => write!(f, "None")
         }
         
     }
@@ -179,8 +192,6 @@ impl std::fmt::Display for S3Document {
     }
 }
   
-
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UserData {
     pub name: Option<String>,
@@ -211,6 +222,7 @@ impl std::fmt::Display for UserData {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SessionData {
     pub created: Option<String>,
+    pub session_login_id: Option<String>,
     pub login: Option<String>,
     pub logout: Option<String>,
     pub auth_data: Option<String>
@@ -222,6 +234,10 @@ impl std::fmt::Display for SessionData {
         match &self.created {
             Some(s) => write!(f, ", created: Some(\"{}\")", s)?,
             None => write!(f, ", created: None")?
+        };
+        match &self.session_login_id {
+            Some(s) => write!(f, ", session_login_id: Some(\"{}\")", s)?,
+            None => write!(f, ", session_login_id: None")?
         };
         match &self.login {
             Some(s) => write!(f, ", login: Some(\"{}\")", s)?,
@@ -253,6 +269,7 @@ pub enum LegalEntity {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Session {
     pub session_id: String,
+    pub session_login_id: Option<String>,
     pub created: Option<String>,
     pub login: Option<String>,
     pub logout: Option<String>,
@@ -264,6 +281,7 @@ impl Session {
     pub fn session_data(&self) -> SessionData {
         SessionData{
             created: self.created.clone(), 
+            session_login_id: self.session_login_id.clone(),
             login: self.login.clone(),
             logout: self.logout.clone(),
             auth_data: self.auth_data.clone()
@@ -277,6 +295,10 @@ impl std::fmt::Display for Session {
         match &self.created {
             Some(s) => write!(f, ", created: Some(\"{}\")", s)?,
             None => write!(f, ", created: None")?
+        };
+        match &self.session_login_id {
+            Some(s) => write!(f, ", session_login_id: Some(\"{}\")", s)?,
+            None => write!(f, ", session_login_id: None")?
         };
         match &self.login {
             Some(s) => write!(f, ", login: Some(\"{}\")", s)?,

@@ -27,6 +27,7 @@ use rusoto_dynamodb::{
     QueryInput,
     ScanInput
 };
+use anyhow::{Result};
 
 use uuid::Uuid;
 
@@ -42,7 +43,7 @@ use insignia_datastore::*;
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-
+    
 
         println!("Hello, world!");
 
@@ -51,9 +52,9 @@ pub async fn main() -> Result<()> {
         endpoint: "http://localhost:8000".to_owned(),
     };
 
-    let client = insignia_datastore::GraphDb::new();
+    let client = insignia_datastore::GraphDb::new("eu-north-1", "http://localhost:8000");
 
-    match client.client.delete_table(DeleteTableInput{table_name: String::from("bm-test-table")}).sync() {
+    match client.client.delete_table(DeleteTableInput{table_name: String::from("bm-test-table")}).await {
         Ok(_) => println!("Deleted table"),
         Err(_) => println!("Delete failed")
     }
@@ -84,71 +85,13 @@ doc-nnnn    link            "permissons"
 }
 
 */
-    match client.client.create_table(CreateTableInput{
-        table_name: String::from("insignia-docs"),
-        key_schema: vec![
-            KeySchemaElement {
-                attribute_name: "vertex_a".into(),
-                key_type: "HASH".into(),
-            }, 
-            KeySchemaElement {
-                attribute_name: "edge".into(),
-                key_type: "RANGE".into(),
-            }
-        ],
-        attribute_definitions: vec![
-            AttributeDefinition {
-                attribute_name: "vertex_a".into(),
-                attribute_type: "S".into(),
-            },
-            AttributeDefinition {
-                attribute_name: "vertex_b".into(),
-                attribute_type: "S".into(),
-            },
-            AttributeDefinition {
-                 attribute_name: "edge".into(),
-                 attribute_type: "S".into(),
-            }
-        ],
-        global_secondary_indexes: Some(vec![
-            GlobalSecondaryIndex{
-                index_name: "index-vertex_b_edges".into(),
-                key_schema: vec![
-                    KeySchemaElement {
-                        attribute_name: "vertex_b".into(),
-                        key_type: "HASH".into(),
-                    }, 
-                    KeySchemaElement {
-                        attribute_name: "edge".into(),
-                        key_type: "RANGE".into(),
-                    }
-                ],
-                projection: Projection {
-                    non_key_attributes: None,
-                    projection_type: Some("ALL".into())
+    client.create_table().await?;
 
-                },
-                provisioned_throughput: Some(ProvisionedThroughput {
-                    read_capacity_units: 1,
-                    write_capacity_units: 1,
-                })
-            }
-        ]),
-        provisioned_throughput: Some(ProvisionedThroughput {
-            read_capacity_units: 1,
-            write_capacity_units: 1,
-        }),
-        ..CreateTableInput::default()
-    }).sync() {
-        Ok(out) => println!("Sucess! {:?}", out),
-        Err(err) => println!("Error {:?}", err)
-    }
+    let mut user1 = client.new_user("191212121212", "Tolvan Tolvansson", "Tolvan", "Tolvansson", Some("tolvan.tolvansson@motrice.se"), Some("+46733414983"), None).await?;
     
-    let mut user1 = client.new_user("191212121212", "Tolvan Tolvansson", "Tolvan", "Tolvansson", Some("tolvan.tolvansson@motrice.se"), Some("+46733414983"), None)?;
-    
-    match client.upload_document_url(&user1.parse()?) {
+    match client.upload_document_url(&user1.parse()?).await {
         Ok(todo_doc_id) => {
-            match client.upload_document_completed(&todo_doc_id, "foobucket", "barkey", "1234checksum") {
+            match client.upload_document_completed(&todo_doc_id, "foobucket", "barkey", "1234checksum").await {
                 Ok(_) => println!("upload doc completed"),
                 Err(err) => println!("upload doc err {}", err)
             }
@@ -159,7 +102,7 @@ doc-nnnn    link            "permissons"
     let scan_edges : Vec<Edge> = match client.client.scan(ScanInput{
         table_name: String::from("insignia-docs"),
         ..ScanInput::default()
-    }).sync(){
+    }).await {
             Ok(res) => {
                 res.items.unwrap_or_else(|| vec![]).into_iter().map(|item| serde_dynamodb::from_hashmap(item).unwrap()).collect()
             },
@@ -174,7 +117,7 @@ doc-nnnn    link            "permissons"
     }
 
     for item in &scan_edges {
-        let edges = client.get_vertex_with_edges(&item.vertex_a).unwrap();
+        let edges = client.get_vertex_with_edges(&item.vertex_a).await?;
         println!("Vertex: {}", &item.vertex_a);
         for edge in &edges {
             //println!("    Edge {} {} {} {:?}", edge.vertex_b, edge.edge, edge.vertex_a, edge.data);
@@ -183,37 +126,31 @@ doc-nnnn    link            "permissons"
         }
     }
 
-    let users = client.get_users_by_personal_number("191212121212");
+    let users = client.get_users_by_personal_number("191212121212").await;
     for item in &users {
         println!("Tolvan user: {}", item);
     }
 
-    match client.session_new() {
+    match client.session_new().await {
         Ok(session) => {
             println!("new session:            {}", &session);
-            match client.session_get(&session.session_id) {
-                Some(loaded_sess) =>  {
-                    println!("Loaded the new session: {}", &loaded_sess);
-                },
-                None => println!("Could not load new session")
+            let sessions = client.sessions_get(&session.session_id).await;
+            for loaded_sess in &sessions {
+                println!("Loaded the new session: {}", &loaded_sess);
             }
-            match client.session_auth(&session.session_id, &users[0].user_id, "logged in from ip 123.456.7.8") {
+            match client.session_auth(&session.session_id, &users[0].user_id, "logged in from ip 123.456.7.8").await {
                 Ok(sess_auth) =>  {
                     println!("auth session:            {}", &session);
-                    match client.session_get(&sess_auth.session_id) {
-                        Some(loaded_sess) =>  {
-                            println!("Loaded the auth session: {}", &loaded_sess);
-                        },
-                        None => println!("Could not load new session")
+                    let sessions =  client.sessions_get(&sess_auth.session_id).await;
+                    for loaded_sess in &sessions {
+                        println!("Loaded the new session auth: {}", &loaded_sess);
                     }
-
-                    match client.session_logout(&sess_auth.session_id) {
+                    println!("logout session:            {}", &session);
+                    match client.session_logout(&sess_auth.session_id).await {
                         Ok(_) => {
-                            match client.session_get(&sess_auth.session_id) {
-                                Some(loaded_sess) =>  {
-                                    println!("Loaded the logo session: {}", &loaded_sess);
-                                },
-                                None => println!("Could not load new session")
+                            let sessions =  client.sessions_get(&sess_auth.session_id).await;
+                            for loaded_sess in &sessions {
+                                println!("Loaded the new session logout: {}", &loaded_sess);
                             }
                         },
                         Err(err) => println!("Error during session logout {}", err)        
@@ -226,9 +163,9 @@ doc-nnnn    link            "permissons"
         Err(err) => println!("Error while creating new session {}", err)
     }
 
-    match client.upload_document_url(&users[0].user_id.parse()?) {
+    match client.upload_document_url(&users[0].user_id.parse()?).await {
         Ok(todo_doc_id) => {
-            match client.upload_document_completed(&todo_doc_id, "somebucketname", "somekeyval", "somesha") {
+            match client.upload_document_completed(&todo_doc_id, "somebucketname", "somekeyval", "somesha").await {
                 Ok(_) => println!("upload doc completed"),
                 Err(err) => println!("upload doc err {}", err)
             }
@@ -236,13 +173,13 @@ doc-nnnn    link            "permissons"
         Err(err) => println!("Error {}", err)
     }
 
-    let user_documents =  client.get_user_documents(&users[0].user_id);
+    let user_documents =  client.get_user_documents(&users[0].user_id).await;
     for item in &user_documents {
         println!("User document: {}", &item);
     }
 
-    match client.vertex_dot(&users[0].user_id.to_string()) {
-        Ok(dot) => println!("dot: {}", dot),
+    match client.vertex_dot(&users[0].user_id.to_string()).await {
+        Ok((dot, links)) => println!("dot: {} {}", dot, links),
         Err(err) => println!("upload doc err {}", err)
     };
     Ok(())
