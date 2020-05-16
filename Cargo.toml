@@ -1,6 +1,6 @@
 [package]
 name = "insignia-datastore"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Björn Molin <bjorn.molin@motrice.se>"]
 edition = "2018"
 
@@ -9,6 +9,8 @@ edition = "2018"
 log = "^0.4"
 rusoto_core = "0.43"
 rusoto_dynamodb = "0.43"
+rusoto_s3 = "0.43"
+rusoto_credential = "0.43"
 uuid = { version = "0.8", features = ["v4"] }
 serde = "1"
 serde_dynamodb = "0.5"

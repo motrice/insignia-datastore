@@ -89,7 +89,7 @@ doc-nnnn    link            "permissons"
 
     let mut user1 = client.new_user("191212121212", "Tolvan Tolvansson", "Tolvan", "Tolvansson", Some("tolvan.tolvansson@motrice.se"), Some("+46733414983"), None).await?;
     
-    match client.upload_document_url(&user1.parse()?).await {
+    match client.upload_document_url("motrice-insignia", &user1.parse()?).await {
         Ok(todo_doc_id) => {
             match client.upload_document_completed(&todo_doc_id, "foobucket", "barkey", "1234checksum").await {
                 Ok(_) => println!("upload doc completed"),
@@ -163,7 +163,7 @@ doc-nnnn    link            "permissons"
         Err(err) => println!("Error while creating new session {}", err)
     }
 
-    match client.upload_document_url(&users[0].user_id.parse()?).await {
+    match client.upload_document_url("motrice-insignia", &users[0].user_id.parse()?).await {
         Ok(todo_doc_id) => {
             match client.upload_document_completed(&todo_doc_id, "somebucketname", "somekeyval", "somesha").await {
                 Ok(_) => println!("upload doc completed"),

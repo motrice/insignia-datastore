@@ -29,6 +29,9 @@ use rusoto_dynamodb::{
     QueryInput,
     ScanInput
 };
+use rusoto_credential::{AwsCredentials, EnvironmentProvider, ProvideAwsCredentials};
+use rusoto_s3::util::PreSignedRequest;
+
 use anyhow::{Result, bail};
 
 use log::{info, warn, error};
@@ -336,11 +339,20 @@ impl GraphDb {
             format!("<ul>{}</ul>", &vertex_links)))
     }
 
-    pub async fn upload_document_url(&self, user_id: &Vertex) -> Result<String> {
+    pub async fn upload_document_url(&self, bucket:&str, user_id: &Vertex) -> Result<String> {
+        let credentials = EnvironmentProvider::default().credentials().await.unwrap();
         let doc_id = Vertex::Document(Uuid::new_v4().to_hyphenated().to_string());
         let edge = new_edge(&user_id, &EdgeType::DocumentOwner, &doc_id, Some(VertexData::String(String::from("some document data"))));
+
+        let req = rusoto_s3::PutObjectRequest {
+            bucket: String::from(bucket),
+            key: format!("uploads/{}", &doc_id.to_string()),
+            ..Default::default()
+        };
         self.store_edge(&edge).await?;
-        Ok(format!("{}", &doc_id)) // TODO signed url
+        
+        let presigned_url = req.get_presigned_url(&rusoto_core::Region::EuNorth1, &credentials, &Default::default());
+        Ok(presigned_url) 
     }
 
 
